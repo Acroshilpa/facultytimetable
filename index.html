@@ -33,19 +33,19 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 🔧 CONFIGURATION — EDIT THESE AFTER FIREBASE SETUP
+// 🔧 FIREBASE CONFIGURATION
 // ══════════════════════════════════════════════════════════════════════════════
-const FIREBASE_CONFIG = {
+const firebaseConfig = {
   apiKey: "AIzaSyCFiD1iILiVSd4jzKeFHWJo713LiG9w3Ek",
   authDomain: "faculty-timetable-171b1.firebaseapp.com",
   databaseURL: "https://faculty-timetable-171b1-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "faculty-timetable-171b1",
   storageBucket: "faculty-timetable-171b1.firebasestorage.app",
   messagingSenderId: "547324034733",
-  appId: "1:547324034733:web:0f6cf9b34b06ae266c1024";
+  appId: "1:547324034733:web:0f6cf9b34b06ae266c1024"
 };
-,
-const ADMIN_EMAIL    = "shilpabhalerao@acropolis.in";
+
+const ADMIN_EMAIL    = "admin@acropolis.in";
 const ADMIN_PASSWORD = "admin123";       // ← change before going live
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -95,9 +95,9 @@ let db = null;
 let firebaseOk = false;
 
 try {
-  const app = firebase.initializeApp(FIREBASE_CONFIG);
+  const app = firebase.initializeApp(firebaseConfig);
   db = firebase.database(app);
-  firebaseOk = !FIREBASE_CONFIG.apiKey.includes("PASTE");
+  firebaseOk = !firebaseConfig.apiKey.includes("PASTE");
 } catch(e) {
   console.warn("Firebase not configured:", e.message);
 }
