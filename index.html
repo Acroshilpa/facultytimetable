@@ -126,54 +126,519 @@ async function clearFacultyChoices(short) {
 function exportExcel(choices) {
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1 – All Choices
-  const rows = [["Faculty Name","Email","Semester","Subject Code","Subject Name","Credits","Preference","Admin Edited","Timestamp"]];
+  // ── Helper: style a cell ──────────────────────────────────────────────────
+  function setCell(ws, addr, value, {bold=false, bg=null, color=null, align="left", border=false}={}) {
+    if (!ws[addr]) ws[addr] = {};
+    ws[addr].v = value;
+    ws[addr].t = typeof value === "number" ? "n" : "s";
+    const font = { name: "Calibri", sz: 11 };
+    if (bold) font.bold = true;
+    if (color) font.color = { rgb: color };
+    ws[addr].s = { font, alignment: { horizontal: align, vertical: "center", wrapText: true } };
+    if (bg) ws[addr].s.fill = { patternType: "solid", fgColor: { rgb: bg } };
+    if (border) ws[addr].s.border = {
+      top:{style:"thin",color:{rgb:"BDBDBD"}}, bottom:{style:"thin",color:{rgb:"BDBDBD"}},
+      left:{style:"thin",color:{rgb:"BDBDBD"}}, right:{style:"thin",color:{rgb:"BDBDBD"}}
+    };
+  }
+
+  function cellAddr(c, r) { return XLSX.utils.encode_cell({c, r}); }
+
+  const PREF_LABEL = { 1:"1st Preference 🥇", 2:"2nd Preference 🥈", 3:"3rd Preference 🥉" };
+  const PREF_BG    = { 1:"E6F4EA", 2:"FEF7E0", 3:"FCE8E6" };
+  const PREF_FG    = { 1:"137333", 2:"994C00", 3:"C5221F" };
+  const SEM_BG     = ["1A73E8","0F9D58","F4B400","DB4437","7B1FA2","00838F"];
+  const HDR_BG     = "1F3864";
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHEET 1 — All Faculty Choices (filled only, grouped by faculty → semester)
+  // ══════════════════════════════════════════════════════════════════════════
+  const ws1 = { "!cols": [{ wch:26 },{ wch:12 },{ wch:30 },{ wch:10 },{ wch:18 }] };
+  let r = 0;
+
+  // Title row
+  ws1["!merges"] = [];
+  setCell(ws1, cellAddr(0,r), "Faculty Subject Preferences — Filled Choices Only",
+    { bold:true, bg:HDR_BG, color:"FFFFFF", align:"center" });
+  for(let c=1;c<=4;c++) setCell(ws1, cellAddr(c,r), "", { bg:HDR_BG });
+  ws1["!merges"].push({ s:{r,c:0}, e:{r,c:4} });
+  r++;
+
+  // Column headers
+  ["Faculty / Semester","Subject Code","Subject Name","Credits","Preference"].forEach((h,c)=>{
+    setCell(ws1, cellAddr(c,r), h, { bold:true, bg:"2E75B6", color:"FFFFFF", align:"center", border:true });
+  });
+  r++;
+
+  let hasAnyData = false;
   for (const f of FACULTY_LIST) {
     const fc = choices[f.short] || {};
+    // collect only filled entries
+    const filledBySem = {};
+    for (const [semStr, subs] of Object.entries(SEMESTERS)) {
+      const sem = parseInt(semStr);
+      const filled = subs
+        .map(s => ({ s, p: fc[sem]?.[s.code] }))
+        .filter(({p}) => p?.rank)
+        .sort((a,b) => a.p.rank - b.p.rank);
+      if (filled.length) filledBySem[sem] = filled;
+    }
+    if (Object.keys(filledBySem).length === 0) continue;
+    hasAnyData = true;
+
+    // Faculty name row (spans all cols)
+    setCell(ws1, cellAddr(0,r), `👤  ${f.name}  (${f.email})`,
+      { bold:true, bg:"E8F0FE", color:"1A237E", border:true });
+    for(let c=1;c<=4;c++) setCell(ws1, cellAddr(c,r), "", { bg:"E8F0FE", border:true });
+    ws1["!merges"].push({ s:{r,c:0}, e:{r,c:4} });
+    r++;
+
+    for (const [sem, filled] of Object.entries(filledBySem)) {
+      const semIdx = parseInt(sem) - 1;
+      const bg = SEM_BG[semIdx] || "607D8B";
+
+      // Semester sub-header
+      setCell(ws1, cellAddr(0,r), `  Semester ${sem}`,
+        { bold:true, bg, color:"FFFFFF", border:true });
+      for(let c=1;c<=4;c++) setCell(ws1, cellAddr(c,r), "", { bg, border:true });
+      ws1["!merges"].push({ s:{r,c:0}, e:{r,c:4} });
+      r++;
+
+      // Subject rows — only filled ones
+      for (const {s, p} of filled) {
+        const pbg = PREF_BG[p.rank] || "FFFFFF";
+        const pfg = PREF_FG[p.rank] || "000000";
+        setCell(ws1, cellAddr(0,r), "", { bg:"FAFAFA", border:true });      // faculty col blank (already shown)
+        setCell(ws1, cellAddr(1,r), s.code,  { bg:"FAFAFA", align:"center", border:true });
+        setCell(ws1, cellAddr(2,r), s.name,  { bg:"FAFAFA", border:true });
+        setCell(ws1, cellAddr(3,r), s.credits,{ bg:"FAFAFA", align:"center", border:true });
+        setCell(ws1, cellAddr(4,r), PREF_LABEL[p.rank] || "", { bg:pbg, color:pfg, align:"center", bold:true, border:true });
+        r++;
+      }
+    }
+    // blank spacer between faculty
+    for(let c=0;c<=4;c++) ws1[cellAddr(c,r)] = { v:"", t:"s" };
+    r++;
+  }
+
+  if (!hasAnyData) {
+    setCell(ws1, cellAddr(0,r), "No choices submitted yet.", { bold:true, color:"C5221F" });
+    r++;
+  }
+
+  ws1["!ref"] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:r-1,c:4} });
+  ws1["!rows"] = Array.from({length:r}, (_,i)=>({ hpt: i===0 ? 22 : 18 }));
+  XLSX.utils.book_append_sheet(wb, ws1, "All Choices");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHEET 2 — Semester-wise view: which faculty chose which subject
+  // ══════════════════════════════════════════════════════════════════════════
+  const ws2 = { "!cols": [{ wch:12 },{ wch:28 },{ wch:10 },{ wch:24 },{ wch:24 },{ wch:24 }] };
+  ws2["!merges"] = [];
+  let r2 = 0;
+
+  setCell(ws2, cellAddr(0,r2), "Semester-wise Subject Preferences",
+    { bold:true, bg:HDR_BG, color:"FFFFFF", align:"center" });
+  for(let c=1;c<=5;c++) setCell(ws2, cellAddr(c,r2), "", { bg:HDR_BG });
+  ws2["!merges"].push({ s:{r:r2,c:0}, e:{r:r2,c:5} });
+  r2++;
+
+  for (const [semStr, subs] of Object.entries(SEMESTERS)) {
+    const sem = parseInt(semStr);
+    const semIdx = sem - 1;
+    const bg = SEM_BG[semIdx] || "607D8B";
+
+    // Semester header
+    setCell(ws2, cellAddr(0,r2), `Semester ${sem}`,
+      { bold:true, bg, color:"FFFFFF", align:"center", border:true });
+    for(let c=1;c<=5;c++) setCell(ws2, cellAddr(c,r2), "", { bg, border:true });
+    ws2["!merges"].push({ s:{r:r2,c:0}, e:{r:r2,c:5} });
+    r2++;
+
+    // Column headers
+    ["Subject Code","Subject Name","Credits","1st Preference 🥇","2nd Preference 🥈","3rd Preference 🥉"]
+      .forEach((h,c) => setCell(ws2, cellAddr(c,r2), h,
+        { bold:true, bg:"2E75B6", color:"FFFFFF", align:"center", border:true }));
+    r2++;
+
+    for (const s of subs) {
+      const f1 = FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===1).map(f=>f.short);
+      const f2 = FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===2).map(f=>f.short);
+      const f3 = FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===3).map(f=>f.short);
+      // only show row if at least one faculty chose this subject
+      if (f1.length + f2.length + f3.length === 0) continue;
+
+      const rowBg = "FAFAFA";
+      setCell(ws2, cellAddr(0,r2), s.code,          { bg:rowBg, align:"center", border:true });
+      setCell(ws2, cellAddr(1,r2), s.name,          { bg:rowBg, border:true });
+      setCell(ws2, cellAddr(2,r2), s.credits,       { bg:rowBg, align:"center", border:true });
+      setCell(ws2, cellAddr(3,r2), f1.join(", ")||"—", { bg:f1.length?"E6F4EA":rowBg, color:f1.length?"137333":"9E9E9E", border:true });
+      setCell(ws2, cellAddr(4,r2), f2.join(", ")||"—", { bg:f2.length?"FEF7E0":rowBg, color:f2.length?"994C00":"9E9E9E", border:true });
+      setCell(ws2, cellAddr(5,r2), f3.join(", ")||"—", { bg:f3.length?"FCE8E6":rowBg, color:f3.length?"C5221F":"9E9E9E", border:true });
+      r2++;
+    }
+
+    for(let c=0;c<=5;c++) ws2[cellAddr(c,r2)] = { v:"", t:"s" };
+    r2++;
+  }
+
+  ws2["!ref"] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:r2-1,c:5} });
+  ws2["!rows"] = Array.from({length:r2}, ()=>({ hpt:18 }));
+  XLSX.utils.book_append_sheet(wb, ws2, "Semester-wise View");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHEET 3 — Faculty Summary (submission status)
+  // ══════════════════════════════════════════════════════════════════════════
+  const ws3 = { "!cols": [{ wch:26 },{ wch:32 },{ wch:12 },{ wch:12 },{ wch:12 },{ wch:10 },{ wch:14 }] };
+  ws3["!merges"] = [];
+  let r3 = 0;
+
+  setCell(ws3, cellAddr(0,r3), "Faculty Submission Summary",
+    { bold:true, bg:HDR_BG, color:"FFFFFF", align:"center" });
+  for(let c=1;c<=6;c++) setCell(ws3, cellAddr(c,r3), "", { bg:HDR_BG });
+  ws3["!merges"].push({ s:{r:r3,c:0}, e:{r:r3,c:6} });
+  r3++;
+
+  ["Faculty Name","Email","1st Pref","2nd Pref","3rd Pref","Total","Status"].forEach((h,c)=>
+    setCell(ws3, cellAddr(c,r3), h, { bold:true, bg:"2E75B6", color:"FFFFFF", align:"center", border:true }));
+  r3++;
+
+  for (const f of FACULTY_LIST) {
+    const fc = choices[f.short] || {};
+    let c1=0, c2=0, c3=0;
+    for (const semData of Object.values(fc))
+      for (const v of Object.values(semData || {})) {
+        if (v?.rank===1) c1++; else if (v?.rank===2) c2++; else if (v?.rank===3) c3++;
+      }
+    const tot = c1+c2+c3;
+    const status = tot===0 ? "⏳ Not Submitted" : tot<3 ? "🔶 Partial" : "✅ Complete";
+    const statusBg = tot===0 ? "FCE8E6" : tot<3 ? "FEF7E0" : "E6F4EA";
+    const rowBg = "FAFAFA";
+    setCell(ws3, cellAddr(0,r3), f.name,    { bg:rowBg, border:true });
+    setCell(ws3, cellAddr(1,r3), f.email,   { bg:rowBg, border:true });
+    setCell(ws3, cellAddr(2,r3), c1,        { bg:"E6F4EA", align:"center", border:true });
+    setCell(ws3, cellAddr(3,r3), c2,        { bg:"FEF7E0", align:"center", border:true });
+    setCell(ws3, cellAddr(4,r3), c3,        { bg:"FCE8E6", align:"center", border:true });
+    setCell(ws3, cellAddr(5,r3), tot,       { bg:rowBg, align:"center", bold:true, border:true });
+    setCell(ws3, cellAddr(6,r3), status,    { bg:statusBg, align:"center", bold:true, border:true });
+    r3++;
+  }
+
+  ws3["!ref"] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:r3-1,c:6} });
+  ws3["!rows"] = Array.from({length:r3}, ()=>({ hpt:18 }));
+  XLSX.utils.book_append_sheet(wb, ws3, "Submission Status");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHEET 4 — Subject-wise Deep Analysis
+  // ══════════════════════════════════════════════════════════════════════════
+  const ws4 = { "!cols": [{wch:12},{wch:28},{wch:8},{wch:10},{wch:10},{wch:10},{wch:16},{wch:28},{wch:18},{wch:16}] };
+  ws4["!merges"] = [];
+  let r4 = 0;
+
+  // Title
+  setCell(ws4, cellAddr(0,r4), "Subject-wise Analysis — Demand & Interest",
+    { bold:true, bg:HDR_BG, color:"FFFFFF", align:"center" });
+  for(let c=1;c<=9;c++) setCell(ws4, cellAddr(c,r4), "", { bg:HDR_BG });
+  ws4["!merges"].push({ s:{r:r4,c:0}, e:{r:r4,c:9} });
+  r4++;
+
+  // Legend
+  setCell(ws4, cellAddr(0,r4), "🔴 High Conflict = 2+ faculty chose as 1st pref  |  🟡 Low Interest = only 2nd/3rd chosen  |  ⚪ No Interest = nobody chose",
+    { bold:false, bg:"FFF8E1", color:"5D4037", align:"left" });
+  for(let c=1;c<=9;c++) setCell(ws4, cellAddr(c,r4), "", { bg:"FFF8E1" });
+  ws4["!merges"].push({ s:{r:r4,c:0}, e:{r:r4,c:9} });
+  r4++;
+
+  const hdr4 = ["Subject Code","Subject Name","Credits","1st Pref\nCount","2nd Pref\nCount","3rd Pref\nCount",
+                 "Total Interest","Faculty Who Chose (1st)","Faculty Who Chose (2nd/3rd)","Status"];
+  hdr4.forEach((h,c)=>setCell(ws4, cellAddr(c,r4), h,
+    { bold:true, bg:"1F3864", color:"FFFFFF", align:"center", border:true }));
+  r4++;
+
+  for (const [semStr, subs] of Object.entries(SEMESTERS)) {
+    const sem = parseInt(semStr);
+    const semBg = SEM_BG[sem-1] || "607D8B";
+
+    // Sem divider
+    setCell(ws4, cellAddr(0,r4), `Semester ${sem}`,
+      { bold:true, bg:semBg, color:"FFFFFF", align:"center", border:true });
+    for(let c=1;c<=9;c++) setCell(ws4, cellAddr(c,r4), "", { bg:semBg, border:true });
+    ws4["!merges"].push({ s:{r:r4,c:0}, e:{r:r4,c:9} });
+    r4++;
+
+    for (const s of subs) {
+      const f1 = FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===1);
+      const f2 = FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===2);
+      const f3 = FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===3);
+      const total = f1.length + f2.length + f3.length;
+
+      let status, rowBg, fgCol;
+      if (f1.length >= 2)       { status="🔴 High Conflict";  rowBg="FCE8E6"; fgCol="C5221F"; }
+      else if (f1.length === 1) { status="✅ Assigned";        rowBg="E6F4EA"; fgCol="137333"; }
+      else if (total > 0)       { status="🟡 Low Interest";   rowBg="FEF7E0"; fgCol="994C00"; }
+      else                      { status="⚪ No Interest";     rowBg="F5F5F5"; fgCol="9E9E9E"; }
+
+      const f23 = [...f2, ...f3].map(f=>`${f.short}(${f2.includes(f)?"2nd":"3rd"})`);
+
+      setCell(ws4, cellAddr(0,r4), s.code,               { bg:rowBg, align:"center", border:true });
+      setCell(ws4, cellAddr(1,r4), s.name,               { bg:rowBg, border:true });
+      setCell(ws4, cellAddr(2,r4), s.credits,            { bg:rowBg, align:"center", border:true });
+      setCell(ws4, cellAddr(3,r4), f1.length,            { bg:f1.length>=2?"FCE8E6":"E6F4EA", align:"center", bold:true, border:true });
+      setCell(ws4, cellAddr(4,r4), f2.length,            { bg:"FEF7E0", align:"center", border:true });
+      setCell(ws4, cellAddr(5,r4), f3.length,            { bg:"FCE8E6", align:"center", border:true });
+      setCell(ws4, cellAddr(6,r4), total,                { bg:total>0?"E8F0FE":"F5F5F5", align:"center", bold:true, border:true });
+      setCell(ws4, cellAddr(7,r4), f1.map(f=>f.name).join(", ") || "—",
+        { bg:f1.length?"E6F4EA":rowBg, color:f1.length?"137333":"9E9E9E", border:true });
+      setCell(ws4, cellAddr(8,r4), f23.join(", ") || "—",
+        { bg:f23.length?"FEF7E0":rowBg, color:f23.length?"994C00":"9E9E9E", border:true });
+      setCell(ws4, cellAddr(9,r4), status,               { bg:rowBg, color:fgCol, bold:true, align:"center", border:true });
+      r4++;
+    }
+    for(let c=0;c<=9;c++) ws4[cellAddr(c,r4)] = { v:"", t:"s" };
+    r4++;
+  }
+
+  ws4["!ref"] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:r4-1,c:9} });
+  ws4["!rows"] = Array.from({length:r4}, (_,i)=>({ hpt: i<2 ? 20 : 18 }));
+  XLSX.utils.book_append_sheet(wb, ws4, "Subject-wise Analysis");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHEET 5 — Faculty-wise Workload & Coverage Analysis
+  // ══════════════════════════════════════════════════════════════════════════
+  const ws5 = { "!cols": [{wch:26},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:18},{wch:18}] };
+  ws5["!merges"] = [];
+  let r5 = 0;
+
+  setCell(ws5, cellAddr(0,r5), "Faculty-wise Workload & Coverage Analysis",
+    { bold:true, bg:HDR_BG, color:"FFFFFF", align:"center" });
+  for(let c=1;c<=8;c++) setCell(ws5, cellAddr(c,r5), "", { bg:HDR_BG });
+  ws5["!merges"].push({ s:{r:r5,c:0}, e:{r:r5,c:8} });
+  r5++;
+
+  // Summary stats row
+  const totalFac = FACULTY_LIST.length;
+  const submittedFac = FACULTY_LIST.filter(f=>{
+    const fc = choices[f.short]||{};
+    return Object.values(fc).some(s=>Object.values(s||{}).some(v=>v?.rank));
+  }).length;
+  const totalSubjects = Object.values(SEMESTERS).flat().length;
+  const coveredSubjects = Object.entries(SEMESTERS).reduce((acc,[semStr,subs])=>{
+    const sem=parseInt(semStr);
+    return acc + subs.filter(s=>FACULTY_LIST.some(f=>choices[f.short]?.[sem]?.[s.code]?.rank)).length;
+  },0);
+
+  const statsRow = [
+    [`Total Faculty: ${totalFac}`, `Submitted: ${submittedFac}`, `Pending: ${totalFac-submittedFac}`,
+     `Total Subjects: ${totalSubjects}`, `Covered: ${coveredSubjects}`, `Uncovered: ${totalSubjects-coveredSubjects}`]
+  ];
+  statsRow[0].forEach((v,c)=>{
+    const bgs = ["E8F0FE","E6F4EA","FCE8E6","E8F0FE","E6F4EA","FCE8E6"];
+    setCell(ws5, cellAddr(c,r5), v, { bold:true, bg:bgs[c]||"FAFAFA", align:"center", border:true });
+  });
+  for(let c=6;c<=8;c++) setCell(ws5, cellAddr(c,r5), "", { bg:"FAFAFA", border:true });
+  r5++;
+
+  // Column headers
+  ["Faculty Name","Semesters\nCovered","Subjects\nChosen","1st Pref","2nd Pref","3rd Pref","Total\nCredits","Subjects Chosen (1st)","Workload Level"]
+    .forEach((h,c)=>setCell(ws5, cellAddr(c,r5), h, { bold:true, bg:"2E75B6", color:"FFFFFF", align:"center", border:true }));
+  r5++;
+
+  for (const f of FACULTY_LIST) {
+    const fc = choices[f.short] || {};
+    let c1=0,c2=0,c3=0,totalCredits=0;
+    const semsWithChoices = new Set();
+    const first1st = [];
+
     for (const [semStr, subs] of Object.entries(SEMESTERS)) {
       const sem = parseInt(semStr);
       for (const s of subs) {
         const p = fc[sem]?.[s.code];
-        if (p) rows.push([f.name, f.email, `Semester ${sem}`, s.code, s.name, s.credits,
-          p.rank===1?"1st Preference":p.rank===2?"2nd Preference":"3rd Preference",
-          p.adminEdit?"Yes":"No", p.ts?new Date(p.ts).toLocaleString():""]);
+        if (!p?.rank) continue;
+        if (p.rank===1){ c1++; totalCredits+=s.credits; semsWithChoices.add(sem); first1st.push(s.name); }
+        else if (p.rank===2){ c2++; semsWithChoices.add(sem); }
+        else if (p.rank===3){ c3++; semsWithChoices.add(sem); }
       }
     }
-  }
-  const ws1 = XLSX.utils.aoa_to_sheet(rows);
-  ws1["!cols"] = [22,30,12,12,24,8,16,10,20].map(w=>({wch:w}));
-  XLSX.utils.book_append_sheet(wb, ws1, "All Choices");
+    const tot = c1+c2+c3;
+    let workload, wlBg;
+    if (tot===0)       { workload="⏳ Not Started"; wlBg="F5F5F5"; }
+    else if (c1===0)   { workload="🟡 No 1st Prefs"; wlBg="FEF7E0"; }
+    else if (c1>=4)    { workload="🔴 Overloaded";   wlBg="FCE8E6"; }
+    else if (c1>=2)    { workload="✅ Balanced";      wlBg="E6F4EA"; }
+    else               { workload="🔵 Light";         wlBg="E8F0FE"; }
 
-  // Sheet 2 – Faculty Summary
-  const sum = [["Faculty Name","Email","1st Pref","2nd Pref","3rd Pref","Total","Status"]];
-  for (const f of FACULTY_LIST) {
-    const fc = choices[f.short] || {};
-    let c1=0,c2=0,c3=0;
-    for (const s of Object.values(fc)) for (const v of Object.values(s||{})) {
-      if(v?.rank===1)c1++; else if(v?.rank===2)c2++; else if(v?.rank===3)c3++;
-    }
-    const tot=c1+c2+c3;
-    sum.push([f.name,f.email,c1,c2,c3,tot,tot===0?"Not Submitted":tot<6?"Partial":"Complete"]);
+    const rowBg = tot===0 ? "F5F5F5" : "FAFAFA";
+    setCell(ws5, cellAddr(0,r5), f.name,                           { bg:rowBg, bold:tot>0, border:true });
+    setCell(ws5, cellAddr(1,r5), semsWithChoices.size,             { bg:rowBg, align:"center", border:true });
+    setCell(ws5, cellAddr(2,r5), tot,                              { bg:tot===0?"FCE8E6":rowBg, align:"center", bold:true, border:true });
+    setCell(ws5, cellAddr(3,r5), c1,                               { bg:c1?"E6F4EA":rowBg, align:"center", bold:true, color:c1?"137333":"000000", border:true });
+    setCell(ws5, cellAddr(4,r5), c2,                               { bg:c2?"FEF7E0":rowBg, align:"center", border:true });
+    setCell(ws5, cellAddr(5,r5), c3,                               { bg:c3?"FCE8E6":rowBg, align:"center", border:true });
+    setCell(ws5, cellAddr(6,r5), totalCredits,                     { bg:rowBg, align:"center", bold:true, border:true });
+    setCell(ws5, cellAddr(7,r5), first1st.slice(0,4).join(", ")||(tot>0?"Only 2nd/3rd chosen":"—"),
+      { bg:rowBg, border:true });
+    setCell(ws5, cellAddr(8,r5), workload,                         { bg:wlBg, align:"center", bold:true, border:true });
+    r5++;
   }
-  const ws2 = XLSX.utils.aoa_to_sheet(sum);
-  ws2["!cols"]=[24,32,10,10,10,8,14].map(w=>({wch:w}));
-  XLSX.utils.book_append_sheet(wb, ws2, "Faculty Summary");
 
-  // Sheet 3 – Conflicts
-  const conf = [["Semester","Subject Code","Subject Name","1st Pref Faculty (Conflict)","2nd Pref Faculty","3rd Pref Faculty"]];
+  ws5["!ref"] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:r5-1,c:8} });
+  ws5["!rows"] = Array.from({length:r5}, ()=>({ hpt:18 }));
+  XLSX.utils.book_append_sheet(wb, ws5, "Faculty-wise Analysis");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHEET 6 — Remaining / Unallocated Subjects (needs attention)
+  // ══════════════════════════════════════════════════════════════════════════
+  const ws6 = { "!cols": [{wch:12},{wch:28},{wch:8},{wch:14},{wch:14},{wch:20},{wch:24},{wch:22}] };
+  ws6["!merges"] = [];
+  let r6 = 0;
+
+  setCell(ws6, cellAddr(0,r6), "Remaining Subjects — Needs Coordinator Attention",
+    { bold:true, bg:"C62828", color:"FFFFFF", align:"center" });
+  for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"C62828" });
+  ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+  r6++;
+
+  // Tally counts for summary
+  let noInterestCount=0, conflictCount=0, lowInterestCount=0;
   for (const [semStr,subs] of Object.entries(SEMESTERS)) {
     const sem=parseInt(semStr);
     for (const s of subs) {
-      const f1=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===1).map(f=>f.short);
-      const f2=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===2).map(f=>f.short);
-      const f3=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===3).map(f=>f.short);
-      if(f1.length>1) conf.push([`Semester ${sem}`,s.code,s.name,f1.join(", "),f2.join(", "),f3.join(", ")]);
+      const f1=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===1).length;
+      const total=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank).length;
+      if(total===0) noInterestCount++;
+      else if(f1>=2) conflictCount++;
+      else if(f1===0) lowInterestCount++;
     }
   }
-  if(conf.length===1) conf.push(["—","—","No conflicts found","","",""]);
-  const ws3=XLSX.utils.aoa_to_sheet(conf);
-  ws3["!cols"]=[12,12,24,28,20,20].map(w=>({wch:w}));
-  XLSX.utils.book_append_sheet(wb, ws3, "Conflicts");
+
+  // Summary
+  const sumItems = [
+    [`🚨 No Interest: ${noInterestCount} subjects`, "FCE8E6","C5221F"],
+    [`⚡ Conflicts: ${conflictCount} subjects`,     "FFF3E0","E65100"],
+    [`🟡 Low Interest: ${lowInterestCount} subjects`,"FEF7E0","994C00"],
+    [`✅ Well Covered: ${Object.values(SEMESTERS).flat().length - noInterestCount - conflictCount - lowInterestCount} subjects`,"E6F4EA","137333"]
+  ];
+  sumItems.forEach(([txt,bg,col],c)=>{
+    setCell(ws6, cellAddr(c,r6), txt, { bold:true, bg, color:col, align:"center", border:true });
+  });
+  for(let c=4;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"FAFAFA", border:true });
+  r6++;
+
+  // Sub-section 1: No Interest
+  setCell(ws6, cellAddr(0,r6), "🚨  SECTION A — NO FACULTY INTEREST (Assign Manually)",
+    { bold:true, bg:"B71C1C", color:"FFFFFF", align:"left" });
+  for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"B71C1C" });
+  ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+  r6++;
+
+  ["Subject Code","Subject Name","Credits","Semester","Total Faculty","Suggested Action","Available Faculty (no pref)","Priority"].forEach((h,c)=>
+    setCell(ws6, cellAddr(c,r6), h, { bold:true, bg:"C62828", color:"FFFFFF", align:"center", border:true }));
+  r6++;
+
+  let hasNoInterest=false;
+  for (const [semStr,subs] of Object.entries(SEMESTERS)) {
+    const sem=parseInt(semStr);
+    for (const s of subs) {
+      const total=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank).length;
+      if(total>0) continue;
+      hasNoInterest=true;
+      // Faculty who haven't chosen this subject at all
+      const avail=FACULTY_LIST.filter(f=>!choices[f.short]?.[sem]?.[s.code]?.rank).map(f=>f.short);
+      setCell(ws6, cellAddr(0,r6), s.code,                          { bg:"FFF5F5", align:"center", border:true });
+      setCell(ws6, cellAddr(1,r6), s.name,                          { bg:"FFF5F5", bold:true, border:true });
+      setCell(ws6, cellAddr(2,r6), s.credits,                       { bg:"FFF5F5", align:"center", border:true });
+      setCell(ws6, cellAddr(3,r6), `Semester ${sem}`,               { bg:"FFF5F5", align:"center", border:true });
+      setCell(ws6, cellAddr(4,r6), FACULTY_LIST.length,             { bg:"FFF5F5", align:"center", border:true });
+      setCell(ws6, cellAddr(5,r6), "Coordinator must assign",       { bg:"FCE8E6", color:"C5221F", bold:true, align:"center", border:true });
+      setCell(ws6, cellAddr(6,r6), avail.slice(0,5).join(", "),     { bg:"FFF5F5", border:true });
+      setCell(ws6, cellAddr(7,r6), s.credits>=4?"🔴 High":"🟡 Medium", { bg:s.credits>=4?"FCE8E6":"FEF7E0", align:"center", bold:true, border:true });
+      r6++;
+    }
+  }
+  if(!hasNoInterest){
+    setCell(ws6, cellAddr(0,r6), "✅ All subjects have at least some interest!",
+      { bold:true, bg:"E6F4EA", color:"137333" });
+    for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"E6F4EA" });
+    ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+    r6++;
+  }
+
+  for(let c=0;c<=7;c++) ws6[cellAddr(c,r6)]={v:"",t:"s"}; r6++;
+
+  // Sub-section 2: Conflicts
+  setCell(ws6, cellAddr(0,r6), "⚡  SECTION B — CONFLICTS (Multiple Faculty Want Same Subject as 1st Choice)",
+    { bold:true, bg:"E65100", color:"FFFFFF", align:"left" });
+  for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"E65100" });
+  ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+  r6++;
+
+  ["Subject Code","Subject Name","Credits","Semester","1st Pref Count","Faculty in Conflict","2nd Pref Fallback","Resolution"].forEach((h,c)=>
+    setCell(ws6, cellAddr(c,r6), h, { bold:true, bg:"BF360C", color:"FFFFFF", align:"center", border:true }));
+  r6++;
+
+  let hasConflict=false;
+  for (const [semStr,subs] of Object.entries(SEMESTERS)) {
+    const sem=parseInt(semStr);
+    for (const s of subs) {
+      const f1=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===1);
+      if(f1.length<2) continue;
+      hasConflict=true;
+      const f2=FACULTY_LIST.filter(f=>choices[f.short]?.[sem]?.[s.code]?.rank===2);
+      setCell(ws6, cellAddr(0,r6), s.code,                           { bg:"FFF3E0", align:"center", border:true });
+      setCell(ws6, cellAddr(1,r6), s.name,                           { bg:"FFF3E0", bold:true, border:true });
+      setCell(ws6, cellAddr(2,r6), s.credits,                        { bg:"FFF3E0", align:"center", border:true });
+      setCell(ws6, cellAddr(3,r6), `Semester ${sem}`,                { bg:"FFF3E0", align:"center", border:true });
+      setCell(ws6, cellAddr(4,r6), f1.length,                        { bg:"FCE8E6", align:"center", bold:true, color:"C5221F", border:true });
+      setCell(ws6, cellAddr(5,r6), f1.map(f=>f.short).join(", "),   { bg:"FCE8E6", color:"C5221F", bold:true, border:true });
+      setCell(ws6, cellAddr(6,r6), f2.length?f2.map(f=>f.short).join(", "):"None", { bg:"FEF7E0", border:true });
+      setCell(ws6, cellAddr(7,r6), "Assign one; redirect others to 2nd pref", { bg:"FFF3E0", color:"E65100", border:true });
+      r6++;
+    }
+  }
+  if(!hasConflict){
+    setCell(ws6, cellAddr(0,r6), "✅ No conflicts — each subject has at most 1 faculty with 1st preference!",
+      { bold:true, bg:"E6F4EA", color:"137333" });
+    for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"E6F4EA" });
+    ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+    r6++;
+  }
+
+  for(let c=0;c<=7;c++) ws6[cellAddr(c,r6)]={v:"",t:"s"}; r6++;
+
+  // Sub-section 3: Faculty who haven't submitted
+  setCell(ws6, cellAddr(0,r6), "⏳  SECTION C — FACULTY YET TO SUBMIT CHOICES",
+    { bold:true, bg:"37474F", color:"FFFFFF", align:"left" });
+  for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"37474F" });
+  ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+  r6++;
+
+  ["Faculty Name","Email","Status","","","","",""].forEach((h,c)=>
+    setCell(ws6, cellAddr(c,r6), h, { bold:true, bg:"546E7A", color:"FFFFFF", align:"center", border:true }));
+  r6++;
+
+  const pendingFac = FACULTY_LIST.filter(f=>{
+    const fc=choices[f.short]||{};
+    return !Object.values(fc).some(s=>Object.values(s||{}).some(v=>v?.rank));
+  });
+  if(pendingFac.length===0){
+    setCell(ws6, cellAddr(0,r6), "✅ All faculty have submitted their choices!",
+      { bold:true, bg:"E6F4EA", color:"137333" });
+    for(let c=1;c<=7;c++) setCell(ws6, cellAddr(c,r6), "", { bg:"E6F4EA" });
+    ws6["!merges"].push({ s:{r:r6,c:0}, e:{r:r6,c:7} });
+    r6++;
+  } else {
+    for(const f of pendingFac){
+      setCell(ws6, cellAddr(0,r6), f.name,                     { bg:"FAFAFA", bold:true, border:true });
+      setCell(ws6, cellAddr(1,r6), f.email,                    { bg:"FAFAFA", border:true });
+      setCell(ws6, cellAddr(2,r6), "⏳ Not Submitted",          { bg:"FCE8E6", color:"C5221F", bold:true, align:"center", border:true });
+      for(let c=3;c<=7;c++) setCell(ws6, cellAddr(c,r6), "Send reminder", { bg:"FFF8E1", color:"994C00", align:"center", border:true });
+      r6++;
+    }
+  }
+
+  ws6["!ref"] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:r6-1,c:7} });
+  ws6["!rows"] = Array.from({length:r6}, ()=>({ hpt:18 }));
+  XLSX.utils.book_append_sheet(wb, ws6, "Remaining & Action Items");
 
   XLSX.writeFile(wb, "Faculty_Subject_Choices.xlsx");
 }
