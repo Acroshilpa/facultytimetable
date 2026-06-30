@@ -16,6 +16,7 @@
 <!-- Firebase v9 compat (works without bundler) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -45,8 +46,9 @@ const firebaseConfig = {
   appId: "1:547324034733:web:0f6cf9b34b06ae266c1024"
 };
 
-const ADMIN_EMAIL    = "admin@acropolis.in";
-const ADMIN_PASSWORD = "admin123";       // ← change before going live
+// Admin is identified by this email address; access is granted via
+// Google Sign-In (no password is stored in this app — see signInWithGoogle()).
+const ADMIN_EMAIL = "admin@acropolis.in";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 📋 DEPARTMENT DATA
@@ -92,14 +94,43 @@ const PREF = {
 // 🔥 FIREBASE INIT
 // ══════════════════════════════════════════════════════════════════════════════
 let db = null;
+let auth = null;
 let firebaseOk = false;
+const googleProvider = typeof firebase !== "undefined" ? new firebase.auth.GoogleAuthProvider() : null;
+if (googleProvider) {
+  googleProvider.setCustomParameters({ hd: "acropolis.in" }); // restrict to acropolis.in Google Workspace accounts
+}
 
 try {
   const app = firebase.initializeApp(firebaseConfig);
   db = firebase.database(app);
+  auth = firebase.auth(app);
   firebaseOk = !firebaseConfig.apiKey.includes("PASTE");
 } catch(e) {
   console.warn("Firebase not configured:", e.message);
+}
+
+// Google Sign-In
+async function signInWithGoogle() {
+  const result = await auth.signInWithPopup(googleProvider);
+  const email = (result.user.email || "").toLowerCase();
+  if (!email.endsWith("@acropolis.in")) {
+    await auth.signOut();
+    throw new Error("Please sign in with your @acropolis.in Google account.");
+  }
+  if (email === ADMIN_EMAIL) {
+    return { role: "admin", user: result.user };
+  }
+  const fac = FACULTY_LIST.find(f => f.email.toLowerCase() === email);
+  if (!fac) {
+    await auth.signOut();
+    throw new Error("Your email is not registered as faculty. Contact your coordinator.");
+  }
+  return { role: "faculty", faculty: fac, user: result.user };
+}
+
+function signOutGoogle() {
+  if (auth) auth.signOut();
 }
 
 // Realtime listeners + writes
@@ -665,31 +696,20 @@ function Toast({msg}) {
 // 🔐 LOGIN
 // ══════════════════════════════════════════════════════════════════════════════
 function LoginScreen({onLogin}) {
-  const [step,setStep]=useState("email");
-  const [email,setEmail]=useState("");
-  const [password,setPassword]=useState("");
   const [error,setError]=useState("");
-  const [matched,setMatched]=useState(null);
-  const ref=useRef();
-  useEffect(()=>{ setTimeout(()=>ref.current?.focus(),80); },[step]);
+  const [loading,setLoading]=useState(false);
 
-  const goNext=()=>{
-    const e=email.trim().toLowerCase();
-    if(!e){setError("Enter your email address.");return;}
-    if(e===ADMIN_EMAIL){setStep("admin-pass");setError("");return;}
-    const f=FACULTY_LIST.find(f=>f.email.toLowerCase()===e);
-    if(!f){setError("No account found. Contact your coordinator.");return;}
-    setMatched(f);setStep("password");setError("");
+  const handleGoogleSignIn=async()=>{
+    setError("");setLoading(true);
+    try{
+      const result=await signInWithGoogle();
+      onLogin(result);
+    }catch(e){
+      setError(e.message||"Sign-in failed. Please try again.");
+    }finally{
+      setLoading(false);
+    }
   };
-
-  const doLogin=()=>{
-    if(!password.trim()||password.length<4){setError("Enter your password (min 4 chars).");return;}
-    if(step==="admin-pass"&&password!==ADMIN_PASSWORD){setError("Incorrect admin password.");return;}
-    setError("");
-    onLogin(step==="admin-pass"?{role:"admin"}:{role:"faculty",faculty:matched});
-  };
-
-  const isAdmin=step==="admin-pass";
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#f8f9fa"}}>
@@ -711,66 +731,38 @@ function LoginScreen({onLogin}) {
       {/* Card */}
       <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
         <div style={{background:"#fff",borderRadius:16,padding:"40px 44px",width:420,
-          boxShadow:"0 2px 12px rgba(0,0,0,.10)"}}>
-          <div style={{textAlign:"center",marginBottom:24}}>
-            <svg width="44" height="44" viewBox="0 0 48 48">
+          boxShadow:"0 2px 12px rgba(0,0,0,.10)",textAlign:"center"}}>
+          <svg width="44" height="44" viewBox="0 0 48 48" style={{margin:"0 auto 20px"}}>
+            <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.8 2.2 30.3 0 24 0 14.7 0 6.7 5.4 2.7 13.3l7.9 6.1C12.5 13 17.8 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.1z"/>
+            <path fill="#FBBC05" d="M10.6 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.6l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.7 10.7l7.9-6.1z"/>
+            <path fill="#34A853" d="M24 48c6.3 0 11.6-2.1 15.5-5.7l-7.6-5.9c-2.1 1.4-4.8 2.2-7.9 2.2-6.2 0-11.5-3.5-13.4-8.6l-7.9 6.1C6.7 42.6 14.7 48 24 48z"/>
+          </svg>
+
+          <h2 style={{fontSize:22,fontWeight:400,color:"#202124",marginBottom:6}}>Sign in</h2>
+          <p style={{fontSize:13,color:"#5f6368",marginBottom:28}}>
+            Use your <span style={{color:"#1a73e8",fontWeight:500}}>@acropolis.in</span> Google account
+          </p>
+
+          {error&&<Err msg={error}/>}
+
+          <button onClick={handleGoogleSignIn} disabled={loading||!firebaseOk}
+            style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+              padding:"11px 16px",border:"1.5px solid #dadce0",borderRadius:8,background:"#fff",
+              fontSize:14,fontWeight:600,color:"#3c4043",cursor:loading||!firebaseOk?"not-allowed":"pointer",
+              opacity:loading||!firebaseOk?0.6:1}}>
+            <svg width="18" height="18" viewBox="0 0 48 48">
               <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.8 2.2 30.3 0 24 0 14.7 0 6.7 5.4 2.7 13.3l7.9 6.1C12.5 13 17.8 9.5 24 9.5z"/>
               <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.1z"/>
               <path fill="#FBBC05" d="M10.6 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.6l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.7 10.7l7.9-6.1z"/>
               <path fill="#34A853" d="M24 48c6.3 0 11.6-2.1 15.5-5.7l-7.6-5.9c-2.1 1.4-4.8 2.2-7.9 2.2-6.2 0-11.5-3.5-13.4-8.6l-7.9 6.1C6.7 42.6 14.7 48 24 48z"/>
             </svg>
+            {loading?"Signing in…":"Sign in with Google"}
+          </button>
+
+          <div style={{fontSize:11,color:"#80868b",marginTop:20,lineHeight:1.6}}>
+            Only @acropolis.in accounts registered as faculty or admin can access this system.
           </div>
-
-          {step==="email"&&<>
-            <h2 style={{fontSize:22,fontWeight:400,textAlign:"center",color:"#202124",marginBottom:6}}>Sign in</h2>
-            <p style={{fontSize:13,color:"#5f6368",textAlign:"center",marginBottom:24}}>
-              Use your <span style={{color:"#1a73e8",fontWeight:500}}>@acropolis.in</span> email
-            </p>
-            {error&&<Err msg={error}/>}
-            <label style={{fontSize:12,fontWeight:600,color:"#444",display:"block",marginBottom:5}}>Email address</label>
-            <input ref={ref} value={email} onChange={e=>{setEmail(e.target.value);setError("");}}
-              onKeyDown={e=>e.key==="Enter"&&goNext()} placeholder="yourname@acropolis.in"
-              style={iStyle}/>
-            <div style={{fontSize:11,color:"#80868b",marginBottom:20,lineHeight:1.6}}>
-              Faculty: amit.kumar · sunita.verma · rakesh.gupta · meena.joshi · vijay.singh · asha.patel @acropolis.in<br/>
-              Admin: admin@acropolis.in
-            </div>
-            <div style={{display:"flex",justifyContent:"flex-end"}}>
-              <Btn label="Next →" onClick={goNext}/>
-            </div>
-          </>}
-
-          {(step==="password"||isAdmin)&&<>
-            {matched&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",
-              background:"#f8f9fa",borderRadius:24,border:"1px solid #dadce0",
-              width:"fit-content",margin:"0 auto 20px"}}>
-              <Avatar name={matched.name} size={26}/>
-              <span style={{fontSize:13,color:"#202124"}}>{matched.email}</span>
-              <button onClick={()=>{setStep("email");setPassword("");setError("");setMatched(null);}}
-                style={{background:"none",border:"none",cursor:"pointer",color:"#1a73e8",fontSize:11}}>▼</button>
-            </div>}
-            {isAdmin&&<div style={{textAlign:"center",marginBottom:14}}>
-              <span style={{background:"#fce8e6",color:"#c5221f",padding:"4px 14px",
-                borderRadius:20,fontSize:12,fontWeight:700}}>🔐 Admin Access</span>
-            </div>}
-            <h2 style={{fontSize:20,fontWeight:400,textAlign:"center",color:"#202124",marginBottom:20}}>
-              {isAdmin?"Enter admin password":`Welcome, ${matched?.name.split(" ").slice(-1)[0]}!`}
-            </h2>
-            {error&&<Err msg={error}/>}
-            <label style={{fontSize:12,fontWeight:600,color:"#444",display:"block",marginBottom:5}}>Password</label>
-            <input ref={ref} type="password" value={password}
-              onChange={e=>{setPassword(e.target.value);setError("");}}
-              onKeyDown={e=>e.key==="Enter"&&doLogin()}
-              placeholder={isAdmin?"Admin password":"Your password"} style={iStyle}/>
-            <div style={{fontSize:11,color:"#80868b",marginBottom:20}}>
-              {isAdmin?"Demo admin password: admin123":"Demo: any password (min 4 chars) works."}
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <button onClick={()=>{setStep("email");setPassword("");setError("");setMatched(null);}}
-                style={{background:"none",border:"none",cursor:"pointer",color:"#1a73e8",fontSize:13}}>← Back</button>
-              <Btn label="Sign in" onClick={doLogin}/>
-            </div>
-          </>}
         </div>
       </div>
       <div style={{textAlign:"center",padding:"14px 0",fontSize:11,color:"#80868b"}}>
@@ -1428,10 +1420,39 @@ function AdminEdit({faculty,editLocal,editSem,setEditSem,setPref,onSave,onCancel
 // ══════════════════════════════════════════════════════════════════════════════
 function App() {
   const [session,setSession]=useState(null);
+  const [checking,setChecking]=useState(true);
+
+  // Restore session if Firebase Auth already has a signed-in user (page refresh)
+  useEffect(()=>{
+    if(!auth){setChecking(false);return;}
+    const unsub=auth.onAuthStateChanged(user=>{
+      if(user){
+        const email=(user.email||"").toLowerCase();
+        if(email===ADMIN_EMAIL){setSession({role:"admin",user});}
+        else{
+          const fac=FACULTY_LIST.find(f=>f.email.toLowerCase()===email);
+          if(fac) setSession({role:"faculty",faculty:fac,user});
+          else setSession(null);
+        }
+      } else {
+        setSession(null);
+      }
+      setChecking(false);
+    });
+    return unsub;
+  },[]);
+
+  const handleLogout=()=>{
+    signOutGoogle();
+    setSession(null);
+  };
+
+  if(checking) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",
+    justifyContent:"center",color:"#5f6368",fontSize:14}}>Loading…</div>;
   if(!session) return <LoginScreen onLogin={setSession}/>;
   return session.role==="faculty"
-    ?<FacultyShell session={session} onLogout={()=>setSession(null)}/>
-    :<AdminShell onLogout={()=>setSession(null)}/>;
+    ?<FacultyShell session={session} onLogout={handleLogout}/>
+    :<AdminShell onLogout={handleLogout}/>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
