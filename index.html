@@ -46,9 +46,9 @@ const firebaseConfig = {
   appId: "1:547324034733:web:0f6cf9b34b06ae266c1024"
 };
 
-// Admin is identified by this email address; access is granted via
-// Google Sign-In (no password is stored in this app — see signInWithGoogle()).
-const ADMIN_EMAIL = "shilpabhalerao@acropolis.in";
+// Admin emails — both personal and HOD email are recognized as admin
+const ADMIN_EMAILS = ["shilpabhalerao@acropolis.in", "hodcsit@acropolis.in"];
+const ADMIN_EMAIL  = ADMIN_EMAILS[0]; // primary (kept for reference)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 📋 DEPARTMENT DATA
@@ -74,15 +74,42 @@ const FACULTY_LIST = [
 ];
 
 const SEMESTERS = {
- 3:[      {code:"CSIT303",name:" Data Structure",credits:4},{code:"CSIT304",name:" Digital Circuits & Systems",credits:4},
-     {code:"CSIT305",name:" Object Oriented Programming & Methodology",credits:3}
-     {code:"CY301",name:" Technical Communication",credits:4},      {code:"CY302",name:" Fundamentals of Cryptography",credits:4} ,     {code:"CY303",name:" Data Structures",credits:4} ,     {code:"CY304",name:" Digital Systems",credits:4} , {code:"CY305",name:" Object Oriented Programming & Methodology",credits:4}   ],
-  5:[{code:"CSIT501",name:" Computer Networking",credits:4},{code:"CSIT502",name:" Operating System",credits:4},     {code:"CSIT503(A)",name:" Theory of Computation",credits:4 CS 504 (A) Cyber Security, CY-503(C) Data Security {code:"CSIT504 (C)",name:" Web Technology & E Commerce",credits:4},
-     {code:"CSIT505",name:" Linux (LAB)",credits:3}, {code:"CY501",name:" OS Internals for Security Support ",credits:4},{code:"CY502",name:" Design& Analysis of Algorithms",credits:4},{code:"CY503 (B) ",name:"  Network Security",credits:4}, {code:"CY504 (B) ",name:" " Internet of Things",credits:4}   ], CY-504(C) Computer Organization & Architecture
-
-7:[{code:"CSIT701",name:" Internet of Things",credits:4},{code:"CSIT702 (A)",name:" Information Storage & Management",credits:4},{code:"CSIT702 (B)",name:" Compiler Design",credits:4},CSIT 703(A) E-Commerce & Web Technology{code:"CSIT703 (C)",name:" Cloud Computing",credits:4},
- {code:"CY701",name:" Machine Learning",credits:4}, 702(A) Penetration Testing & Vulnerability Analysis,{code:"CY702 (B)",name:" - Block Chain & Crypto-Currencies",credits:4}, , {code:"CY703 (A)",name:" Ethical Hacking",credits:4}, {code:"CY703 (D)",name:" Cloud Computing",credits:4},
-
+  3:[
+    {code:"CSIT303",  name:"Data Structure",                            credits:4},
+    {code:"CSIT304",  name:"Digital Circuits & Systems",                credits:4},
+    {code:"CSIT305",  name:"Object Oriented Programming & Methodology", credits:3},
+    {code:"CY301",    name:"Technical Communication",                   credits:4},
+    {code:"CY302",    name:"Fundamentals of Cryptography",              credits:4},
+    {code:"CY303",    name:"Data Structures",                           credits:4},
+    {code:"CY304",    name:"Digital Systems",                           credits:4},
+    {code:"CY305",    name:"Object Oriented Programming & Methodology", credits:4},
+  ],
+  5:[
+    {code:"CSIT501",     name:"Computer Networking",               credits:4},
+    {code:"CSIT502",     name:"Operating System",                  credits:4},
+    {code:"CSIT503(A)",  name:"Theory of Computation",             credits:4},
+    {code:"CSIT504(A)",  name:"Cyber Security",                    credits:4},
+    {code:"CSIT504(C)",  name:"Web Technology & E-Commerce",       credits:4},
+    {code:"CSIT505",     name:"Linux (LAB)",                       credits:3},
+    {code:"CY501",       name:"OS Internals for Security Support", credits:4},
+    {code:"CY502",       name:"Design & Analysis of Algorithms",   credits:4},
+    {code:"CY503(B)",    name:"Network Security",                  credits:4},
+    {code:"CY503(C)",    name:"Data Security",                     credits:4},
+    {code:"CY504(B)",    name:"Internet of Things",                credits:4},
+    {code:"CY504(C)",    name:"Computer Organization & Architecture", credits:4},
+  ],
+  7:[
+    {code:"CSIT701",     name:"Internet of Things",                            credits:4},
+    {code:"CSIT702(A)",  name:"Information Storage & Management",              credits:4},
+    {code:"CSIT702(B)",  name:"Compiler Design",                               credits:4},
+    {code:"CSIT703(A)",  name:"E-Commerce & Web Technology",                   credits:4},
+    {code:"CSIT703(C)",  name:"Cloud Computing",                               credits:4},
+    {code:"CY701",       name:"Machine Learning",                              credits:4},
+    {code:"CY702(A)",    name:"Penetration Testing & Vulnerability Analysis",  credits:4},
+    {code:"CY702(B)",    name:"Block Chain & Crypto-Currencies",               credits:4},
+    {code:"CY703(A)",    name:"Ethical Hacking",                               credits:4},
+    {code:"CY703(D)",    name:"Cloud Computing",                               credits:4},
+  ],
 };
 
 const SEM_COLORS = ["#1a73e8","#0f9d58","#f4b400","#db4437","#7b1fa2","#00838f"];
@@ -120,7 +147,7 @@ async function signInWithGoogle() {
     await auth.signOut();
     throw new Error("Please sign in with your @acropolis.in Google account.");
   }
-  if (email === ADMIN_EMAIL) {
+  if (ADMIN_EMAILS.includes(email)) {
     return { role: "admin", user: result.user };
   }
   const fac = FACULTY_LIST.find(f => f.email.toLowerCase() === email);
@@ -1058,7 +1085,7 @@ function App() {
     const unsub=auth.onAuthStateChanged(user=>{
       if(user){
         const email=(user.email||"").toLowerCase();
-        if(email===ADMIN_EMAIL){setSession({role:"admin",user});}
+        if(ADMIN_EMAILS.includes(email)){setSession({role:"admin",user});}
         else{
           const fac=FACULTY_LIST.find(f=>f.email.toLowerCase()===email);
           if(fac) setSession({role:"faculty",faculty:fac,user});
